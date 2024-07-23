@@ -1,0 +1,55 @@
+﻿let isInit = false;
+
+jQuery(document).ready(function () {
+	if (!isInit)
+		CollectSoftAddToCartLinks();
+});
+
+function CollectSoftAddToCartLinks() {
+	let $CartLinks = null;
+
+	try {
+		$CartLinks = $("a").filter((index, anchor) => $(anchor).attr('href'));
+		$($CartLinks).each(function (index, value) {
+			if (value.toString().toLowerCase().includes('shoppingcart.asp?productcode=')) {
+				jQuery(this).click(function () {
+					let objProductCodes = [];
+					let urlParams = unescape(this).split('?');
+					let productElements = urlParams[1].split('&');
+					$(productElements).each(function (index, value) {
+						objProductCodes[index] = { ProductCode: value.replace(/productcode=/gi, ""), Qty: 1 };
+					});
+					SoftAddMultipleItems(objProductCodes, 1);
+					return false;
+				});
+            }
+			isInit = true;
+		});
+		return true;
+	}
+	catch(err){}
+}
+
+var MoreAddToCartPattern = /shoppingcart\.asp\?productcode=/i;
+var ProductCodeStringPattern = /[^\&=]*$/i;
+var ProductCodePattern = /productcode=/i;
+
+function FindAddToCartLinks(indexInArray, valueOfElement) {
+	var ProductCodeString = '';
+	var ProductCode = '';
+	if (MoreAddToCartPattern.test(valueOfElement)) {
+		ProductCodeString = ProductCodeStringPattern.exec(valueOfElement);
+		if (ProductCodeString.toString()) {
+			ProductCode = ProductCodeString.toString().replace(ProductCodePattern, '');
+			if (ProductCode) {
+				this['ProductCode'] = unescape(ProductCode);
+				jQuery(this).click(function () {
+					SoftAddSingleItem(unescape(ProductCode), 1);
+					return false;
+				});
+            }
+			isInit = true;
+		};
+		return true;
+	}
+}

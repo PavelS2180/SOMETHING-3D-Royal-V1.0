@@ -1,0 +1,204 @@
+﻿const baseStoreUrl = window.location.origin.match(/^.+?[^/:](?=[?/]|$)/i)[0];
+
+const getCartId = () => {
+    const name = `CartID5=`;
+    try {
+        const decodedCookie = decodeURIComponent(document.cookie);
+        const ca = decodedCookie.split(";");
+        for (let i = 0; i < ca.length; i += 1) {
+            let c = ca[i];
+            while (c.charAt(0) === " ") {
+                c = c.substring(1);
+            }
+            if (c.indexOf(name) === 0) {
+                return c.substring(name.length, c.length);
+            }
+        }
+    } catch (e) {
+        const matches = document.cookie.match(`${name}([^;]+);?`);
+        if (matches && matches.length >= 2) {
+            return matches[1];
+        }
+    }
+
+    return "";
+};
+
+const getCartData = async (cartId) => {
+    try {
+        const response = await window.fetch(`${baseStoreUrl}/api/v1/carts/${cartId}`, {
+            credentials: "include",
+        });
+        const result = await response.json();
+        return result.data;
+    } catch (e) {
+        //
+    }
+    return {};
+};
+
+const getPayPalConfig = async () => {
+    const configResponse = await fetch(`${baseStoreUrl}/api/v1/config`);
+    const configBody = await configResponse.json();
+    const paypalConfig = configBody?.data?.paypalExpress ?? {};
+    return {
+        useNewCheckout: window.useNewCheckout && configBody?.data?.enabledState === "enabled",
+        isVenmo: false,
+        ...paypalConfig
+    }
+};
+
+const hasNonZeroTotal = (cartData) => {
+    return cartData?.totals?.grandTotal > 0;
+};
+
+const buildPayPalRequest = (cartData, isDelayedCapture, defaultCurrency) => {
+    const captureMode = isDelayedCapture ? "authorize" : "sale";
+    const totals = cartData.totals ?? { grandTotal: 0, shipping: 0, taxTotal: 0 };
+    const paypalCartSubTotalValue = totals.grandTotal - (totals.shipping + totals.taxTotal);
+    return {
+        intent: captureMode,
+        payer: {
+            payment_method: "paypal",
+        },
+        transactions: {
+            Amount: {
+                currencyValue: defaultCurrency,
+                total: totals.grandTotal.toFixed(2),
+                details: {
+                    tax: totals.taxTotal.toFixed(2),
+                    shipping: totals.shipping.toFixed(2),
+                    subtotal: paypalCartSubTotalValue.toFixed(2),
+                },
+            },
+        },
+        redirect_urls: {
+            return_url: "https://www.paypal.com/checkoutnow/error",
+            cancel_url: "https://www.paypal.com/checkoutnow/error",
+        },
+    };
+};
+
+const createPayPalOrder = async (paypalRequest) => {
+    const endpointLocation = window.isUsingPpcp ? '/net/paypalv2/order' : '/net/PayPalRestCreatePaymentHandler.ashx'
+    const response = await window.fetch(`${baseStoreUrl}${endpointLocation}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json;charset=UTF-8" },
+        body: JSON.stringify(paypalRequest),
+    });
+    return response.json();
+};
+
+const appendPayPalButtonDiv = () => {
+    const pushCartFooter = document.querySelector(".push-cart__footer");
+    const existingPayPalDiv = document.getElementById("paypal-cart-buttons");
+    if (pushCartFooter && !existingPayPalDiv) {
+        const payPalDiv = document.createElement("div");
+        payPalDiv.setAttribute("id", "paypal-cart-buttons");
+        payPalDiv.setAttribute("style", "margin-top: 10px;");
+        pushCartFooter.append(payPalDiv);
+    }
+};
+
+const hasRecurringItem = (cartData) => {
+    return !!cartData?.items?.find(
+        item => item.pricing.recurringPrice.everyXMonths !== ''
+    );
+};
+
+
+const attachPayPalDivToPushCart = async () => {
+    const pushCartFooter = document.querySelector('.push-cart__payment');
+    const cartId = getCartId();
+    const cartData = await getCartData(cartId);
+    if (hasRecurringItem(cartData)) {
+        return;
+    }
+    if (!cartData?.totals?.grandTotal) {
+        return;
+    }
+    if (pushCartFooter) {
+        setTimeout(() => {
+            const payPalDiv = document.createElement('div');
+            payPalDiv.setAttribute('data-pp-message', '');
+            payPalDiv.setAttribute('data-pp-placement', 'cart');
+            payPalDiv.setAttribute('data-pp-style-layout', 'text');
+            payPalDiv.setAttribute('data-pp-style-logo-type', 'inline');
+            payPalDiv.setAttribute('data-pp-style-text-color', 'black');
+            payPalDiv.setAttribute('style', 'min-width: 290px; min-height: 30px;');
+            payPalDiv.setAttribute('data-pp-amount', cartData.totals.grandTotal);
+            pushCartFooter.prepend(payPalDiv);
+        }, 500);
+    }
+};
+
+const renderPayPalButtons = (cartData, paypalConfig) => {
+    const { isDelayedCapture, defaultCurrency, useNewCheckout } = paypalConfig;
+    paypal
+        .Buttons({
+            style: {
+                shape: "rect",
+            },
+            createOrder: async function (data, actions) {
+                
+                if (!cartData?.totals?.grandTotal) {
+                    alert("PayPal is not required for $0.00 orders. Please click 'Checkout' to proceed.");
+                    return;
+                }
+                const paypalRequest = buildPayPalRequest(cartData, isDelayedCapture, defaultCurrency);
+                const result = await createPayPalOrder(paypalRequest);
+                return result.token;
+            },
+            onApprove: function (data, actions) {
+                const queryString = `?token=${data.orderID}&PayerID=${data.payerID.toUpperCase()}&paymentId=${data.paymentID ? data.paymentID.toUpperCase() :  ''}`;
+                if (useNewCheckout) {
+                    return actions.redirect(`${baseStoreUrl}/checkout/${queryString}&isVenmo=${paypalConfig.isVenmo}`);
+                } else {
+                    return actions.redirect(`${baseStoreUrl}/one-page-checkout.asp${queryString}`);
+                }
+            },
+            onClick: function (data, action) {
+                paypalConfig.isVenmo = data.fundingSource?.toLowerCase() === 'venmo';
+            },
+            onCancel: function (data, actions) {
+                //
+            },
+            onError: function (err) {
+                //
+            },
+        })
+        .render("#paypal-cart-buttons");
+};
+
+const loadPayPalButtons = async () => {
+    const paypalConfig = await getPayPalConfig();
+    const cartId = getCartId();
+    const cartData = await getCartData(cartId);
+    if (hasRecurringItem(cartData)) {
+        return;
+    }
+    if (!cartData?.totals?.grandTotal) {
+        return;
+    } else {
+        setTimeout(() => {
+            appendPayPalButtonDiv();
+            renderPayPalButtons(cartData, paypalConfig);
+        }, 500);
+    }
+};
+
+function addClassNameListener(selector, callback) {
+    const checkIfPushCartIsOpen = window.setInterval(() => {
+        const element = document.querySelector(selector);
+        if (element) {
+            const className = element.className;
+            if (/push-cart-open/i.test(className)) {
+                callback();
+                clearInterval(checkIfPushCartIsOpen);
+            }
+        }
+    }, 200);
+}
+
+addClassNameListener('body', attachPayPalDivToPushCart);
+addClassNameListener("body", loadPayPalButtons);

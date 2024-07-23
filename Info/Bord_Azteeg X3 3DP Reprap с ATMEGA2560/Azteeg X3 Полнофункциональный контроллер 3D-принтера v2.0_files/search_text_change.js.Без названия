@@ -1,0 +1,29 @@
+// JavaScript Document		
+
+var searchValue = 'search...';
+var mailValue = 'email address...';
+
+	check_searchbox_focus = function(box) {			
+		if (box.value == searchValue){
+			box.value = '';
+		}
+	};
+	
+	check_searchbox_blur = function(box) {	
+		if (box.value == '') {
+			box.value = searchValue;
+		}    
+	};
+		
+	check_mailbox_focus = function(box) {			
+		if (box.value == mailValue){
+			box.value = '';
+		}
+	};
+	
+	check_mailbox_blur = function(box) {	
+		if (box.value == '') {
+			box.value = mailValue;
+		}    
+	};
+		
